@@ -34,9 +34,10 @@ def get_client():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def find_job_id(name: str) -> Optional[int]:
+    """Find a job whose name contains `name` as a substring."""
     try:
         w = get_client()
-        for job in w.jobs.list(name=name):
+        for job in w.jobs.list():
             settings_name = (job.settings.name or "") if job.settings else ""
             if name in settings_name:
                 return job.job_id
