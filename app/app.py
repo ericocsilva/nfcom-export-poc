@@ -9,9 +9,10 @@ Allows operators to:
 
 import os
 import time
+from typing import List, Optional
+
 import streamlit as st
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.jobs import RunLifeCycleState, RunResultState
 
 # ── Configuration ────────────────────────────────────────────────────────────
 CATALOG     = os.environ.get("CATALOG",  "catalog_1aphlh_uefz2w")
@@ -25,41 +26,58 @@ w = WorkspaceClient()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)
-def get_distinct_values(column: str) -> list[str]:
-    """Query the Delta table for distinct filter values (cached 5 min)."""
+def get_warehouse_id() -> Optional[str]:
+    """Return the first available SQL warehouse id."""
     try:
-        rows = w.statement_execution.execute_statement(
-            warehouse_id=_get_warehouse_id(),
-            statement=f"SELECT DISTINCT {column} FROM {CATALOG}.{SCHEMA}.{TABLE} ORDER BY 1",
+        warehouses = list(w.warehouses.list())
+        running = [wh for wh in warehouses if str(wh.state) in ("RUNNING", "STARTING")]
+        candidates = running or warehouses
+        return candidates[0].id if candidates else None
+    except Exception:
+        return None
+
+
+def get_distinct_values(column: str) -> List[str]:
+    """Query the Delta table for distinct filter values."""
+    wh_id = get_warehouse_id()
+    if not wh_id:
+        return []
+    try:
+        result = w.statement_execution.execute_statement(
+            warehouse_id=wh_id,
+            statement=(
+                f"SELECT DISTINCT {column} "
+                f"FROM `{CATALOG}`.`{SCHEMA}`.`{TABLE}` "
+                f"ORDER BY 1"
+            ),
             wait_timeout="30s",
         )
-        return [r[0] for r in (rows.result.data_array or [])]
+        data = result.result.data_array or [] if result.result else []
+        return [str(row[0]) for row in data]
     except Exception:
         return []
 
 
-@st.cache_data(ttl=600)
-def _get_warehouse_id() -> str:
-    """Return the first available SQL warehouse."""
-    warehouses = list(w.warehouses.list())
-    running = [wh for wh in warehouses if str(wh.state) in ("RUNNING", "STARTING")]
-    if running:
-        return running[0].id
-    if warehouses:
-        return warehouses[0].id
-    raise RuntimeError("No SQL warehouse found in this workspace.")
-
-
-def find_job_id(name: str) -> int | None:
-    """Find a job by exact name match (latest match wins)."""
-    for job in w.jobs.list(name=name):
-        if job.settings and job.settings.name and name in job.settings.name:
-            return job.job_id
+def find_job_id(name: str) -> Optional[int]:
+    """Find a job by partial name match."""
+    try:
+        for job in w.jobs.list(name=name):
+            settings_name = job.settings.name if job.settings else ""
+            if name in (settings_name or ""):
+                return job.job_id
+    except Exception:
+        pass
     return None
 
 
-def trigger_export(job_id: int, empresa: str, uf: str, ano: str, mes: str, dia: str):
+def trigger_export(
+    job_id: int,
+    empresa: str,
+    uf: str,
+    ano: str,
+    mes: str,
+    dia: str,
+) -> int:
     """Submit a one-time job run with the given filter parameters."""
     run = w.jobs.run_now(
         job_id=job_id,
@@ -80,10 +98,9 @@ def get_run_status(run_id: int) -> dict:
     lc  = run.state.life_cycle_state if run.state else None
     rs  = run.state.result_state     if run.state else None
     return {
-        "lifecycle":  str(lc.value) if lc else "UNKNOWN",
-        "result":     str(rs.value) if rs else "",
-        "url":        run.run_page_url or "",
-        "start_time": run.start_time,
+        "lifecycle": str(lc.value) if lc else "UNKNOWN",
+        "result":    str(rs.value) if rs else "",
+        "url":       run.run_page_url or "",
     }
 
 
@@ -101,6 +118,12 @@ st.caption(
     f"to individual XML files at `{VOLUME_PATH}`"
 )
 st.divider()
+
+# ── Session state init ────────────────────────────────────────────────────────
+if "run_id" not in st.session_state:
+    st.session_state.run_id = None
+if "error_msg" not in st.session_state:
+    st.session_state.error_msg = None
 
 # ── Filter Form ───────────────────────────────────────────────────────────────
 st.subheader("Filter criteria")
@@ -120,10 +143,10 @@ with col1:
     )
 
 with col2:
-    uf_options = [""] + get_distinct_values("UF")
+    uf_options = get_distinct_values("UF")
     uf_select  = st.multiselect(
         "UF",
-        options=[u for u in uf_options if u],
+        options=uf_options,
         help="Select zero or more states. Empty = all states.",
     )
     uf_input = ",".join(uf_select)
@@ -157,7 +180,7 @@ with col5:
     )
     dia_input = ",".join(dia_select)
 
-# ── Summary of selected filter ────────────────────────────────────────────────
+# ── Active filter summary ─────────────────────────────────────────────────────
 st.divider()
 filter_parts = []
 if empresa_input: filter_parts.append(f"EMPRESA = `{empresa_input}`")
@@ -171,76 +194,92 @@ if filter_parts:
 else:
     st.warning("No filters selected — **all** records will be exported.", icon="⚠️")
 
+# ── Error display ─────────────────────────────────────────────────────────────
+if st.session_state.error_msg:
+    st.error(st.session_state.error_msg, icon="❌")
+    if st.button("Dismiss"):
+        st.session_state.error_msg = None
+        st.rerun()
+
 # ── Trigger Button ────────────────────────────────────────────────────────────
 st.divider()
 
-if "run_id" not in st.session_state:
-    st.session_state.run_id = None
+col_btn, col_reset = st.columns([2, 10])
+with col_btn:
+    start_clicked = st.button(
+        "🚀 Start Export",
+        type="primary",
+        disabled=st.session_state.run_id is not None,
+    )
 
-if st.button("🚀 Start Export", type="primary", use_container_width=False):
+with col_reset:
+    if st.session_state.run_id is not None:
+        if st.button("↩ New export"):
+            st.session_state.run_id = None
+            st.rerun()
+
+if start_clicked:
+    st.session_state.error_msg = None
     job_id = find_job_id(JOB_NAME)
     if job_id is None:
-        st.error(
+        st.session_state.error_msg = (
             f"Job **{JOB_NAME}** not found. "
-            "Make sure the bundle has been deployed with `databricks bundle deploy`.",
-            icon="❌",
+            "Make sure the bundle has been deployed with `databricks bundle deploy`."
         )
+        st.rerun()
     else:
         with st.spinner("Submitting job run…"):
-            run_id = trigger_export(
-                job_id,
-                empresa=empresa_input,
-                uf=uf_input,
-                ano=ano_input,
-                mes=mes_input,
-                dia=dia_input,
-            )
-        st.session_state.run_id = run_id
-        st.success(f"Job submitted — Run ID: **{run_id}**", icon="✅")
+            try:
+                run_id = trigger_export(
+                    job_id,
+                    empresa=empresa_input,
+                    uf=uf_input,
+                    ano=ano_input,
+                    mes=mes_input,
+                    dia=dia_input,
+                )
+                st.session_state.run_id = run_id
+            except Exception as exc:
+                st.session_state.error_msg = f"Failed to submit job: {exc}"
+        st.rerun()
 
 # ── Job Status Monitor ────────────────────────────────────────────────────────
+TERMINAL_STATES = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
+
 if st.session_state.run_id:
     st.divider()
     st.subheader("Job status")
 
     run_id = st.session_state.run_id
-    status_placeholder = st.empty()
-    progress_placeholder = st.empty()
+    info = get_run_status(run_id)
+    lc   = info["lifecycle"]
+    rs   = info["result"]
+    url  = info["url"]
 
-    TERMINAL_STATES = {"TERMINATED", "SKIPPED", "INTERNAL_ERROR"}
-    POLL_INTERVAL_S = 5
+    col_lc, col_rs = st.columns(2)
+    with col_lc:
+        st.metric("Lifecycle state", lc)
+    with col_rs:
+        if rs:
+            st.metric("Result", rs)
 
-    while True:
-        info = get_run_status(run_id)
-        lc   = info["lifecycle"]
-        rs   = info["result"]
-        url  = info["url"]
+    if url:
+        st.markdown(f"[Open run in Databricks]({url})")
 
-        with status_placeholder.container():
-            st.metric("Lifecycle state", lc)
-            if rs:
-                st.metric("Result", rs)
-            if url:
-                st.markdown(f"[Open run in Databricks]({url})")
-
-        if lc in TERMINAL_STATES:
-            if rs == "SUCCESS":
-                st.balloons()
-                st.success(
-                    f"Export completed successfully! "
-                    f"Files are at `{VOLUME_PATH}`.",
-                    icon="🎉",
-                )
-            else:
-                st.error(
-                    f"Job ended with state: **{rs or lc}**. "
-                    f"Check the [run page]({url}) for details.",
-                    icon="❌",
-                )
-            break
-
-        with progress_placeholder.container():
-            st.info(f"Polling… (refreshing every {POLL_INTERVAL_S}s)", icon="⏳")
-
-        time.sleep(POLL_INTERVAL_S)
+    if lc in TERMINAL_STATES:
+        if rs == "SUCCESS":
+            st.balloons()
+            st.success(
+                f"Export completed! Files are at `{VOLUME_PATH}`.",
+                icon="🎉",
+            )
+        else:
+            st.error(
+                f"Job ended with state: **{rs or lc}**. "
+                f"Check the [run page]({url}) for details.",
+                icon="❌",
+            )
+    else:
+        st.info(f"Job is running… (auto-refreshing every 5 s)", icon="⏳")
+        time.sleep(5)
         st.rerun()
