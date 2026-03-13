@@ -4,7 +4,7 @@ NFCom XML Export — Databricks App (Streamlit)
 
 import os
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import streamlit as st
 
@@ -33,17 +33,28 @@ def get_client():
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def find_job_id(name: str) -> Optional[int]:
-    """Find a job whose name contains `name` as a substring."""
+def list_all_jobs() -> Tuple[List[Tuple[int, str]], Optional[str]]:
+    """Return ([(job_id, name), ...], error_msg)."""
     try:
         w = get_client()
+        jobs = []
         for job in w.jobs.list():
-            settings_name = (job.settings.name or "") if job.settings else ""
-            if name in settings_name:
-                return job.job_id
+            name = (job.settings.name or "") if job.settings else ""
+            jobs.append((job.job_id, name))
+        return jobs, None
     except Exception as exc:
-        st.error(f"Could not list jobs: {exc}", icon="❌")
-    return None
+        return [], str(exc)
+
+
+def find_job_id(name: str) -> Tuple[Optional[int], List[Tuple[int, str]], Optional[str]]:
+    """Return (job_id_or_None, all_jobs, error_msg)."""
+    jobs, err = list_all_jobs()
+    if err:
+        return None, [], err
+    for job_id, job_name in jobs:
+        if name in job_name:
+            return job_id, jobs, None
+    return None, jobs, None
 
 
 def trigger_export(
@@ -102,11 +113,39 @@ st.caption(
 )
 st.divider()
 
+# ── Debug panel ───────────────────────────────────────────────────────────────
+with st.expander("🔍 Debug / Diagnostics", expanded=False):
+    st.markdown(f"**JOB_NAME env:** `{JOB_NAME}`")
+
+    # Auth check
+    try:
+        w = get_client()
+        me = w.current_user.me()
+        st.success(f"SDK auth OK — user: `{me.user_name}`", icon="✅")
+    except Exception as exc:
+        st.error(f"SDK auth failed: {exc}", icon="❌")
+
+    # Job listing
+    jobs, err = list_all_jobs()
+    if err:
+        st.error(f"jobs.list() error: {err}", icon="❌")
+    elif not jobs:
+        st.warning("No jobs found in this workspace.", icon="⚠️")
+    else:
+        st.markdown(f"**Jobs visible to this app ({len(jobs)} total):**")
+        match = [(jid, jname) for jid, jname in jobs if JOB_NAME in jname]
+        if match:
+            st.success(f"Match found: `{match[0][1]}` (id={match[0][0]})", icon="✅")
+        else:
+            st.error(f"No job name contains `{JOB_NAME}`", icon="❌")
+        for jid, jname in jobs:
+            marker = " ✅" if JOB_NAME in jname else ""
+            st.code(f"{jid}  {jname}{marker}")
+
 # ── Filter Form ───────────────────────────────────────────────────────────────
 st.subheader("Filter criteria")
 st.info(
-    "Leave any field blank to export **all** values for that dimension (wildcard). "
-    "Separate multiple values with commas.",
+    "Leave any field blank to export **all** values for that dimension (wildcard).",
     icon="ℹ️",
 )
 
@@ -119,36 +158,25 @@ with col1:
         help="One or more CNPJs, comma-separated. Empty = all companies.",
     )
 with col2:
-    uf_select = st.multiselect(
-        "UF",
-        options=ALL_UFS,
-        help="Select one or more states. Empty = all states.",
-    )
+    uf_select = st.multiselect("UF", options=ALL_UFS,
+                               help="Select states. Empty = all.")
     uf_input = ",".join(uf_select)
 
 with col3:
-    ano_select = st.multiselect(
-        "ANO",
-        options=ALL_ANOS,
-        help="Select one or more years. Empty = all years.",
-    )
+    ano_select = st.multiselect("ANO", options=ALL_ANOS,
+                                help="Select years. Empty = all.")
     ano_input = ",".join(ano_select)
+
 with col4:
-    mes_select = st.multiselect(
-        "MES",
-        options=[str(m) for m in range(1, 13)],
-        format_func=lambda m: f"{int(m):02d}",
-        help="Select one or more months. Empty = all months.",
-    )
+    mes_select = st.multiselect("MES", options=[str(m) for m in range(1, 13)],
+                                format_func=lambda m: f"{int(m):02d}",
+                                help="Select months. Empty = all.")
     mes_input = ",".join(mes_select)
 
 with col5:
-    dia_select = st.multiselect(
-        "DIA",
-        options=[str(d) for d in range(1, 32)],
-        format_func=lambda d: f"{int(d):02d}",
-        help="Select one or more days. Empty = all days.",
-    )
+    dia_select = st.multiselect("DIA", options=[str(d) for d in range(1, 32)],
+                                format_func=lambda d: f"{int(d):02d}",
+                                help="Select days. Empty = all.")
     dia_input = ",".join(dia_select)
 
 # ── Active filter summary ─────────────────────────────────────────────────────
@@ -183,11 +211,15 @@ with col_reset:
             st.rerun()
 
 if start_clicked:
-    job_id = find_job_id(JOB_NAME)
-    if job_id is None:
+    job_id, all_jobs, err = find_job_id(JOB_NAME)
+
+    if err:
+        st.error(f"Error listing jobs: {err}", icon="❌")
+    elif job_id is None:
+        names = "\n".join(f"  • {n}" for _, n in all_jobs) or "  (none)"
         st.error(
-            f"Job **{JOB_NAME}** not found. "
-            "Run `databricks bundle deploy --profile=TKO` first.",
+            f"Job containing **{JOB_NAME}** not found.\n\n"
+            f"Jobs visible to this app:\n{names}",
             icon="❌",
         )
     else:
