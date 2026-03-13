@@ -72,6 +72,11 @@ resources:
       name: "nfcom-export-app"
       description: "NFCom XML Export - Filter and trigger parallel XML file generation"
       source_code_path: ./app
+      resources:
+        - name: nfcom-export-job
+          job:
+            id: ${resources.jobs.nfcom_export_job.id}
+            permission: CAN_MANAGE_RUN
 
 targets:
   dev:
