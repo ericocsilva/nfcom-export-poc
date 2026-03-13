@@ -15,6 +15,15 @@ TABLE       = os.environ.get("TABLE",    "nfcom_data")
 JOB_NAME    = os.environ.get("JOB_NAME", "NFCom - Export XML Files")
 VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/xml_exports"
 
+# ── Static reference data ─────────────────────────────────────────────────────
+ALL_UFS = [
+    "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO",
+    "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR",
+    "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
+]
+CURRENT_YEAR = 2026
+ALL_ANOS = [str(y) for y in range(2020, CURRENT_YEAR + 1)]
+
 # ── Databricks client (lazy, cached for the session) ─────────────────────────
 @st.cache_resource
 def get_client():
@@ -109,38 +118,46 @@ with col1:
         help="One or more CNPJs, comma-separated. Empty = all companies.",
     )
 with col2:
-    uf_input = st.text_input(
+    uf_select = st.multiselect(
         "UF",
-        placeholder="e.g. SP,RJ",
-        help="One or more state codes, comma-separated. Empty = all states.",
+        options=ALL_UFS,
+        help="Select one or more states. Empty = all states.",
     )
+    uf_input = ",".join(uf_select)
+
 with col3:
-    ano_input = st.text_input(
+    ano_select = st.multiselect(
         "ANO",
-        placeholder="e.g. 2025",
-        help="One or more years, comma-separated. Empty = all years.",
+        options=ALL_ANOS,
+        help="Select one or more years. Empty = all years.",
     )
+    ano_input = ",".join(ano_select)
 with col4:
-    mes_input = st.text_input(
+    mes_select = st.multiselect(
         "MES",
-        placeholder="e.g. 1,2,3",
-        help="One or more months (1–12), comma-separated. Empty = all months.",
+        options=[str(m) for m in range(1, 13)],
+        format_func=lambda m: f"{int(m):02d}",
+        help="Select one or more months. Empty = all months.",
     )
+    mes_input = ",".join(mes_select)
+
 with col5:
-    dia_input = st.text_input(
+    dia_select = st.multiselect(
         "DIA",
-        placeholder="e.g. 1,15",
-        help="One or more days (1–31), comma-separated. Empty = all days.",
+        options=[str(d) for d in range(1, 32)],
+        format_func=lambda d: f"{int(d):02d}",
+        help="Select one or more days. Empty = all days.",
     )
+    dia_input = ",".join(dia_select)
 
 # ── Active filter summary ─────────────────────────────────────────────────────
 st.divider()
 filter_parts = []
 if empresa_input.strip(): filter_parts.append(f"EMPRESA = `{empresa_input.strip()}`")
-if uf_input.strip():      filter_parts.append(f"UF = `{uf_input.strip()}`")
-if ano_input.strip():     filter_parts.append(f"ANO = `{ano_input.strip()}`")
-if mes_input.strip():     filter_parts.append(f"MES = `{mes_input.strip()}`")
-if dia_input.strip():     filter_parts.append(f"DIA = `{dia_input.strip()}`")
+if uf_input:              filter_parts.append(f"UF = `{uf_input}`")
+if ano_input:             filter_parts.append(f"ANO = `{ano_input}`")
+if mes_input:             filter_parts.append(f"MES = `{mes_input}`")
+if dia_input:             filter_parts.append(f"DIA = `{dia_input}`")
 
 if filter_parts:
     st.markdown("**Active filters:** " + " | ".join(filter_parts))
@@ -177,10 +194,10 @@ if start_clicked:
             run_id = trigger_export(
                 job_id,
                 empresa=empresa_input.strip(),
-                uf=uf_input.strip(),
-                ano=ano_input.strip(),
-                mes=mes_input.strip(),
-                dia=dia_input.strip(),
+                uf=uf_input,
+                ano=ano_input,
+                mes=mes_input,
+                dia=dia_input,
             )
         if run_id:
             st.session_state.run_id = run_id
