@@ -1,0 +1,11 @@
+command: ["streamlit", "run", "app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+
+env:
+  - name: CATALOG
+    value: "catalog_1aphlh_uefz2w"
+  - name: SCHEMA
+    value: "nfcom_poc"
+  - name: TABLE
+    value: "nfcom_data"
+  - name: JOB_NAME
+    value: "NFCom - Export XML Files"

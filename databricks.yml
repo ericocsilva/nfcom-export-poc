@@ -1,0 +1,92 @@
+# Databricks Asset Bundle - NFCom XML Export PoC
+# Exports NF-Com XML files to Databricks Volumes with high-performance parallel processing
+
+bundle:
+  name: nfcom-export-poc
+
+variables:
+  catalog:
+    default: catalog_1aphlh_uefz2w
+    description: Unity Catalog catalog name
+  schema:
+    default: nfcom_poc
+    description: Schema name for NFCom PoC
+  volume:
+    default: xml_exports
+    description: Volume name for exported XML files
+  table:
+    default: nfcom_data
+    description: Delta table storing NFCom records
+
+resources:
+  jobs:
+    nfcom_export_job:
+      name: "NFCom - Export XML Files"
+      description: >
+        High-performance parallel export of NFCom XML records to individual files
+        in a Databricks Volume. Accepts EMPRESA, UF, ANO, MES, DIA filters;
+        empty values act as wildcard (*). Designed for up to 1 billion records.
+      parameters:
+        - name: empresa
+          default: ""
+        - name: uf
+          default: ""
+        - name: ano
+          default: ""
+        - name: mes
+          default: ""
+        - name: dia
+          default: ""
+      tasks:
+        - task_key: export_xml
+          notebook_task:
+            notebook_path: ./notebooks/02_export_xml.py
+            base_parameters:
+              catalog: "${var.catalog}"
+              schema: "${var.schema}"
+              table: "${var.table}"
+              volume_path: "/Volumes/${var.catalog}/${var.schema}/${var.volume}"
+              empresa: "{{job.parameters.empresa}}"
+              uf: "{{job.parameters.uf}}"
+              ano: "{{job.parameters.ano}}"
+              mes: "{{job.parameters.mes}}"
+              dia: "{{job.parameters.dia}}"
+          job_cluster_key: export_cluster
+      job_clusters:
+        - job_cluster_key: export_cluster
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "Standard_D8ds_v5"
+            num_workers: 16
+            data_security_mode: SINGLE_USER
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
+              spark.sql.shuffle.partitions: "auto"
+            azure_attributes:
+              first_on_demand: 1
+              availability: SPOT_WITH_FALLBACK_AZURE
+              spot_bid_max_price: -1
+
+  apps:
+    nfcom_export_app:
+      name: "nfcom-export-app"
+      description: "NFCom XML Export - Filter and trigger parallel XML file generation"
+      source_code_path: ./app
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-7405618499553895.15.azuredatabricks.net
+    variables:
+      catalog: catalog_1aphlh_uefz2w
+      schema: nfcom_poc
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-7405618499553895.15.azuredatabricks.net
+    variables:
+      catalog: catalog_1aphlh_uefz2w
+      schema: nfcom_poc
