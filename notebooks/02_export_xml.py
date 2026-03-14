@@ -55,21 +55,26 @@ p_ano       = dbutils.widgets.get("ano").strip()
 p_mes       = dbutils.widgets.get("mes").strip()
 p_dia       = dbutils.widgets.get("dia").strip()
 
-# ── Resolve the task run ID (used as export folder name) ─────────────────────
-# In Jobs API 2.1 (multitask jobs) currentRunId is the task-level run ID.
-# This is what the Jobs UI shows for the individual task and what the app
-# resolves via get_run(job_run_id).tasks[0].run_id to build the volume path.
+# ── Resolve the job-level run ID (used as export folder name) ────────────────
+# In Jobs API 2.1 currentRunId is the task-level (child) run ID.
+# We look up its parent_run_id via the Jobs API to get the job-level run ID
+# that matches what jobs.run_now() returns to the calling app.
 try:
-    _nb_ctx = _json.loads(
+    _nb_ctx    = _json.loads(
         dbutils.notebook.entry_point.getDbutils().notebook().getContext().toJson()
     )
-    _run_id = str((_nb_ctx.get("currentRunId") or {}).get("id") or "")
-    if not _run_id:
-        raise ValueError("empty")
+    _task_id   = str((_nb_ctx.get("currentRunId") or {}).get("id") or "")
+    if not _task_id:
+        raise ValueError("currentRunId not found in context")
+    from databricks.sdk import WorkspaceClient as _WC
+    _task_run  = _WC().jobs.get_run(run_id=int(_task_id))
+    _parent_id = getattr(_task_run, "parent_run_id", None)
+    _run_id    = str(_parent_id or _task_id)   # fall back to task ID if no parent
+    print(f"task_run_id={_task_id}  parent_run_id={_parent_id}  -> folder={_run_id}")
 except Exception as _e:
     import time as _t
     _run_id = f"manual_{int(_t.time())}"
-    print(f"Could not resolve run ID from context ({_e}), using fallback: {_run_id}")
+    print(f"Could not resolve run ID ({_e}), using fallback: {_run_id}")
 
 # All files for this run go under a dedicated subfolder
 volume_path = f"{volume_path}/{_run_id}"
