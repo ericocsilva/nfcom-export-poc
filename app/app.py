@@ -211,6 +211,31 @@ def trigger_export(
         return None
 
 
+def get_task_run_id(job_run_id: int) -> Optional[int]:
+    """Return the task-level run_id for the first task of a job run.
+
+    In Jobs API 2.1 the job run_id (returned by run_now) is the parent; each
+    task has its own child run_id that the notebook sees as currentRunId and
+    uses as the export folder name.
+    """
+    try:
+        w = get_client()
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            run = w.jobs.get_run(run_id=job_run_id)
+            tasks = getattr(run, "tasks", None) or []
+            if tasks and getattr(tasks[0], "run_id", None):
+                tid = tasks[0].run_id
+                logger.info(f"Task run_id={tid} (parent job run_id={job_run_id})")
+                return tid
+            time.sleep(2)
+        logger.warning(f"Task run_id not available after 30s for job run_id={job_run_id}")
+        return None
+    except Exception as exc:
+        logger.warning(f"get_task_run_id failed: {exc}")
+        return None
+
+
 def get_run_status(run_id: int) -> dict:
     try:
         w = get_client()
@@ -252,6 +277,7 @@ st.set_page_config(page_title="NFCom XML Export", page_icon="📄", layout="wide
 # ── Session state ─────────────────────────────────────────────────────────────
 for _key, _default in [
     ("run_id", None),
+    ("task_run_id", None),
     ("file_count", None),
     ("submit_duration", None),
 ]:
@@ -331,7 +357,7 @@ with col_start:
 with col_reset:
     if st.session_state.run_id is not None:
         if st.button("↩ New export"):
-            for _k in ("run_id", "file_count", "submit_duration"):
+            for _k in ("run_id", "task_run_id", "file_count", "submit_duration"):
                 st.session_state[_k] = None
             st.rerun()
 
@@ -367,6 +393,8 @@ if start_clicked:
         if run_id:
             st.session_state.run_id = run_id
             st.session_state.submit_duration = time.monotonic() - t0
+            with st.spinner("Resolving export folder…"):
+                st.session_state.task_run_id = get_task_run_id(run_id)
             st.success(f"Job submitted — Run ID: **{run_id}**", icon="✅")
             st.rerun()
 
@@ -383,7 +411,10 @@ if st.session_state.run_id:
     url   = info["url"]
     stats = info.get("stats", {})
 
-    run_volume_path = f"{VOLUME_PATH}/{st.session_state.run_id}"
+    # task_run_id is the folder name the notebook uses (currentRunId);
+    # fall back to job run_id only if task resolution failed
+    _folder = st.session_state.task_run_id or st.session_state.run_id
+    run_volume_path = f"{VOLUME_PATH}/{_folder}"
 
     # ── Pre-run metrics ────────────────────────────────────────────────────────
     pre_cols = st.columns(3)

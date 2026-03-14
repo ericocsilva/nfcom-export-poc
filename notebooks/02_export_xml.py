@@ -55,23 +55,17 @@ p_ano       = dbutils.widgets.get("ano").strip()
 p_mes       = dbutils.widgets.get("mes").strip()
 p_dia       = dbutils.widgets.get("dia").strip()
 
-# ── Resolve the job-level run ID ─────────────────────────────────────────────
-# In Jobs API 2.1 (multitask jobs), jobs.run_now() returns the parent run ID.
-# Inside the notebook, currentRunId is the task-level (child) run ID.
-# The parent (job-level) run ID is exposed as multitaskParentRunId.
+# ── Resolve the task run ID (used as export folder name) ─────────────────────
+# In Jobs API 2.1 (multitask jobs) currentRunId is the task-level run ID.
+# This is what the Jobs UI shows for the individual task and what the app
+# resolves via get_run(job_run_id).tasks[0].run_id to build the volume path.
 try:
     _nb_ctx = _json.loads(
         dbutils.notebook.entry_point.getDbutils().notebook().getContext().toJson()
     )
-    _run_id = str(
-        (_nb_ctx.get("multitaskParentRunId") or {}).get("id")
-        or (_nb_ctx.get("currentRunId") or {}).get("id")
-        or ""
-    )
+    _run_id = str((_nb_ctx.get("currentRunId") or {}).get("id") or "")
     if not _run_id:
         raise ValueError("empty")
-    print(f"Context IDs — multitaskParentRunId={(_nb_ctx.get('multitaskParentRunId') or {}).get('id')} "
-          f"currentRunId={(_nb_ctx.get('currentRunId') or {}).get('id')}")
 except Exception as _e:
     import time as _t
     _run_id = f"manual_{int(_t.time())}"
