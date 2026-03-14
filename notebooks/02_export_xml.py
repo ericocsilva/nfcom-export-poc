@@ -57,19 +57,27 @@ p_dia       = dbutils.widgets.get("dia").strip()
 
 # ── Resolve the job-level run ID (used as export folder name) ────────────────
 # In Jobs API 2.1 currentRunId is the task-level (child) run ID.
-# We look up its parent_run_id via the Jobs API to get the job-level run ID
-# that matches what jobs.run_now() returns to the calling app.
+# The Jobs REST API returns parent_run_id for the task run, but the Python SDK
+# dataclass does not expose that field in all versions — so we call the API
+# directly using the notebook's auth token.
 try:
-    _nb_ctx    = _json.loads(
+    import urllib.request as _ur
+    _nb_ctx  = _json.loads(
         dbutils.notebook.entry_point.getDbutils().notebook().getContext().toJson()
     )
-    _task_id   = str((_nb_ctx.get("currentRunId") or {}).get("id") or "")
+    _task_id = str((_nb_ctx.get("currentRunId") or {}).get("id") or "")
     if not _task_id:
         raise ValueError("currentRunId not found in context")
-    from databricks.sdk import WorkspaceClient as _WC
-    _task_run  = _WC().jobs.get_run(run_id=int(_task_id))
-    _parent_id = getattr(_task_run, "parent_run_id", None)
-    _run_id    = str(_parent_id or _task_id)   # fall back to task ID if no parent
+    _token   = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+    _host    = spark.conf.get("spark.databricks.workspaceUrl")
+    _req     = _ur.Request(
+        f"https://{_host}/api/2.1/jobs/runs/get?run_id={_task_id}",
+        headers={"Authorization": f"Bearer {_token}"},
+    )
+    with _ur.urlopen(_req, timeout=10) as _resp:
+        _run_data  = _json.loads(_resp.read())
+    _parent_id = _run_data.get("parent_run_id")
+    _run_id    = str(_parent_id) if _parent_id else _task_id
     print(f"task_run_id={_task_id}  parent_run_id={_parent_id}  -> folder={_run_id}")
 except Exception as _e:
     import time as _t
