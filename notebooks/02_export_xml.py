@@ -15,16 +15,17 @@
 # MAGIC ### Directory layout
 # MAGIC ```
 # MAGIC /Volumes/<catalog>/<schema>/xml_exports/
-# MAGIC   <EMPRESA_CNPJ>/          ← company CNPJ (dots/slashes sanitized)
-# MAGIC     <UF>/                  ← 2-letter state code
-# MAGIC       <YYYY>/              ← year
-# MAGIC         <MM>/              ← month zero-padded
-# MAGIC           <DD>/            ← day  zero-padded
-# MAGIC             <CHAVE_ACESSO>.xml
+# MAGIC   <job_run_id>/            ← Databricks job run ID (isolates each export run)
+# MAGIC     <EMPRESA_CNPJ>/        ← company CNPJ (dots/slashes sanitized)
+# MAGIC       <UF>/                ← 2-letter state code
+# MAGIC         <YYYY>/            ← year
+# MAGIC           <MM>/            ← month zero-padded
+# MAGIC             <DD>/          ← day  zero-padded
+# MAGIC               <CHAVE_ACESSO>.xml
 # MAGIC ```
-# MAGIC This hierarchy keeps each leaf directory to a manageable file count and
-# MAGIC allows the Databricks Files API / cloud storage to serve directory listings
-# MAGIC quickly even for billions of files.
+# MAGIC The run-ID top-level folder isolates each export so concurrent or repeated
+# MAGIC runs never overwrite each other. Every other level keeps leaf directory
+# MAGIC size manageable for fast directory listings at scale.
 
 # COMMAND ----------
 # DBTITLE 1, Widget Parameters
@@ -42,6 +43,8 @@ dbutils.widgets.text("dia",         "", "DIA filter (CSV or empty = all)")
 # COMMAND ----------
 # DBTITLE 1, Read Parameters
 
+import json as _json
+
 catalog     = dbutils.widgets.get("catalog").strip()
 schema      = dbutils.widgets.get("schema").strip()
 table       = dbutils.widgets.get("table").strip()
@@ -51,6 +54,21 @@ p_uf        = dbutils.widgets.get("uf").strip()
 p_ano       = dbutils.widgets.get("ano").strip()
 p_mes       = dbutils.widgets.get("mes").strip()
 p_dia       = dbutils.widgets.get("dia").strip()
+
+# ── Resolve the current job run ID ────────────────────────────────────────────
+try:
+    _nb_ctx   = _json.loads(dbutils.notebook.entry_point.getDbutils().notebook().getContext().toJson())
+    _run_id   = str(_nb_ctx.get("currentRunId", {}).get("id") or "")
+    if not _run_id:
+        raise ValueError("empty")
+except Exception:
+    import time as _t
+    _run_id = f"manual_{int(_t.time())}"
+
+# All files for this run go under a dedicated subfolder
+volume_path = f"{volume_path}/{_run_id}"
+print(f"Run ID     : {_run_id}")
+print(f"Output dir : {volume_path}")
 
 # COMMAND ----------
 # DBTITLE 1, Build Filter Predicate
@@ -89,7 +107,6 @@ where_clause  = " AND ".join(conditions) if conditions else "1=1"
 filter_desc   = where_clause if conditions else "(all records — no filter)"
 
 print(f"Filter : {filter_desc}")
-print(f"Output : {volume_path}")
 
 # COMMAND ----------
 # DBTITLE 1, Load Filtered Data

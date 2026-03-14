@@ -19,3 +19,5 @@ env:
     value: "nfcom_data"
   - name: JOB_NAME
     value: "NFCom - Export XML Files"
+  - name: LOG_LEVEL
+    value: "INFO"   # Change to DEBUG for verbose output in the Logs tab
