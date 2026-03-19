@@ -6,10 +6,10 @@ bundle:
 
 variables:
   catalog:
-    default: ericos_catalog
+    default: catalog_ajcos9_0aa1b0
     description: Unity Catalog catalog name
   schema:
-    default: godata
+    default: nfcom_poc
     description: Schema name for NFCom PoC
   volume:
     default: xml_exports
@@ -56,16 +56,16 @@ resources:
         - job_cluster_key: export_cluster
           new_cluster:
             spark_version: "15.4.x-scala2.12"
-            node_type_id: "i3.2xlarge"
+            node_type_id: "Standard_D8s_v3"
             num_workers: 4
             data_security_mode: SINGLE_USER
             spark_conf:
               spark.databricks.delta.preview.enabled: "true"
               spark.sql.shuffle.partitions: "auto"
-            aws_attributes:
+            azure_attributes:
               first_on_demand: 1
-              availability: SPOT_WITH_FALLBACK
-              spot_bid_price_percent: 100
+              availability: SPOT_WITH_FALLBACK_AZURE
+              spot_bid_max_price: -1
 
   apps:
     nfcom_export_app:
@@ -83,17 +83,17 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://e2-demo-field-eng.cloud.databricks.com
-      profile: oneenv
+      host: https://adb-7405612655723059.19.azuredatabricks.net
+      profile: Demo
     variables:
-      catalog: ericos_catalog
-      schema: godata
+      catalog: catalog_ajcos9_0aa1b0
+      schema: nfcom_poc
 
   prod:
     mode: production
     workspace:
-      host: https://e2-demo-field-eng.cloud.databricks.com
-      profile: oneenv
+      host: https://adb-7405612655723059.19.azuredatabricks.net
+      profile: Demo
     variables:
-      catalog: ericos_catalog
-      schema: godata
+      catalog: catalog_ajcos9_0aa1b0
+      schema: nfcom_poc

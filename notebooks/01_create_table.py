@@ -9,8 +9,8 @@
 # COMMAND ----------
 # DBTITLE 1, Parameters
 
-CATALOG = "ericos_catalog"
-SCHEMA  = "godata"
+CATALOG = "catalog_ajcos9_0aa1b0"
+SCHEMA  = "nfcom_poc"
 TABLE   = "nfcom_data"
 VOLUME  = "xml_exports"
 

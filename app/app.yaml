@@ -12,9 +12,9 @@ command:
 
 env:
   - name: CATALOG
-    value: "ericos_catalog"
+    value: "catalog_ajcos9_0aa1b0"
   - name: SCHEMA
-    value: "godata"
+    value: "nfcom_poc"
   - name: TABLE
     value: "nfcom_data"
   - name: JOB_NAME
