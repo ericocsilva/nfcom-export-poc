@@ -2,8 +2,10 @@
 NFCom XML Export — Databricks App (Streamlit)
 """
 
+import io
 import logging
 import os
+import tarfile
 import time
 from typing import List, Optional, Tuple
 
@@ -212,6 +214,51 @@ def trigger_export(
 
 
 
+MAX_DOWNLOAD_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB uncompressed limit
+
+
+def list_volume_files(volume_path: str) -> Tuple[List[dict], Optional[str]]:
+    """Return ([{path, name, size}, ...], error_msg) for all files under volume_path."""
+    try:
+        w = get_client()
+        files = []
+        for fi in w.files.list_directory_contents(volume_path):
+            if not fi.is_directory:
+                files.append({
+                    "path": fi.path,
+                    "name": fi.name,
+                    "size": fi.file_size or 0,
+                })
+        logger.debug(f"list_volume_files({volume_path}) → {len(files)} files")
+        return files, None
+    except Exception as exc:
+        logger.error(f"list_volume_files failed: {exc}")
+        return [], str(exc)
+
+
+def build_tar_gz(volume_path: str, files: List[dict]) -> Tuple[Optional[bytes], Optional[str]]:
+    """Download files from volume and return (tar_gz_bytes, error_msg)."""
+    try:
+        w = get_client()
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for f in files:
+                file_path = f["path"]
+                if not file_path.startswith("/"):
+                    file_path = f"{volume_path}/{f['name']}"
+                resp = w.files.download(file_path)
+                data = resp.contents.read()
+                info = tarfile.TarInfo(name=f["name"])
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        result = buf.getvalue()
+        logger.info(f"tar.gz built: {len(result):,} bytes compressed from {len(files)} files")
+        return result, None
+    except Exception as exc:
+        logger.error(f"build_tar_gz failed: {exc}")
+        return None, str(exc)
+
+
 def get_run_status(run_id: int) -> dict:
     try:
         w = get_client()
@@ -332,7 +379,9 @@ with col_start:
 with col_reset:
     if st.session_state.run_id is not None:
         if st.button("↩ New export"):
-            for _k in ("run_id", "file_count", "submit_duration"):
+            for _k in ("run_id", "file_count", "submit_duration",
+                        "download_state", "download_data", "download_error",
+                        "download_total_size", "download_file_count"):
                 st.session_state[_k] = None
             st.rerun()
 
@@ -422,6 +471,85 @@ if st.session_state.run_id:
                 f"Export complete! Files are at `{run_volume_path}`.",
                 icon="🎉",
             )
+
+            # ── Download exported files ────────────────────────────────────────
+            st.subheader("Download exported files")
+
+            if "download_state" not in st.session_state:
+                st.session_state.download_state = None  # None | "checking" | "ready" | "error"
+            if "download_data" not in st.session_state:
+                st.session_state.download_data = None
+            if "download_error" not in st.session_state:
+                st.session_state.download_error = None
+            if "download_total_size" not in st.session_state:
+                st.session_state.download_total_size = 0
+            if "download_file_count" not in st.session_state:
+                st.session_state.download_file_count = 0
+
+            if st.button("📦 Prepare download (.tar.gz)"):
+                st.session_state.download_state = "checking"
+                st.session_state.download_data = None
+                st.session_state.download_error = None
+                st.rerun()
+
+            if st.session_state.download_state == "checking":
+                with st.spinner("Listing exported files and checking total size…"):
+                    files, err = list_volume_files(run_volume_path)
+                    if err:
+                        st.session_state.download_state = "error"
+                        st.session_state.download_error = f"Failed to list files: {err}"
+                        st.rerun()
+                    elif not files:
+                        st.session_state.download_state = "error"
+                        st.session_state.download_error = "No files found in the export directory."
+                        st.rerun()
+                    else:
+                        total_size = sum(f["size"] for f in files)
+                        st.session_state.download_total_size = total_size
+                        st.session_state.download_file_count = len(files)
+
+                        if total_size > MAX_DOWNLOAD_BYTES:
+                            size_gb = total_size / (1024 ** 3)
+                            st.session_state.download_state = "error"
+                            st.session_state.download_error = (
+                                f"Total uncompressed size is **{size_gb:.2f} GB** "
+                                f"({len(files):,} files), which exceeds the **1 GB** download limit. "
+                                f"Please use narrower filters to reduce the export size, "
+                                f"or access the files directly at `{run_volume_path}`."
+                            )
+                            st.rerun()
+                        else:
+                            with st.spinner(
+                                f"Downloading and compressing {len(files):,} files "
+                                f"({total_size / (1024**2):.1f} MB)…"
+                            ):
+                                tar_data, tar_err = build_tar_gz(run_volume_path, files)
+                            if tar_err:
+                                st.session_state.download_state = "error"
+                                st.session_state.download_error = f"Failed to build archive: {tar_err}"
+                            else:
+                                st.session_state.download_state = "ready"
+                                st.session_state.download_data = tar_data
+                            st.rerun()
+
+            if st.session_state.download_state == "error":
+                st.error(st.session_state.download_error, icon="❌")
+
+            if st.session_state.download_state == "ready" and st.session_state.download_data:
+                compressed_mb = len(st.session_state.download_data) / (1024 ** 2)
+                original_mb = st.session_state.download_total_size / (1024 ** 2)
+                st.info(
+                    f"Archive ready: **{st.session_state.download_file_count:,}** files, "
+                    f"**{original_mb:.1f} MB** original → **{compressed_mb:.1f} MB** compressed",
+                    icon="📦",
+                )
+                st.download_button(
+                    label="⬇️ Download .tar.gz",
+                    data=st.session_state.download_data,
+                    file_name=f"nfcom_export_{st.session_state.run_id}.tar.gz",
+                    mime="application/gzip",
+                )
+
         else:
             st.error(
                 f"Job ended with **{rs or lc}**. "
