@@ -218,17 +218,22 @@ MAX_DOWNLOAD_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB uncompressed limit
 
 
 def list_volume_files(volume_path: str) -> Tuple[List[dict], Optional[str]]:
-    """Return ([{path, name, size}, ...], error_msg) for all files under volume_path."""
+    """Recursively list all files under volume_path (handles nested EMPRESA/UF/ANO/MES/DIA dirs)."""
     try:
         w = get_client()
         files = []
-        for fi in w.files.list_directory_contents(volume_path):
-            if not fi.is_directory:
-                files.append({
-                    "path": fi.path,
-                    "name": fi.name,
-                    "size": fi.file_size or 0,
-                })
+        dirs_to_visit = [volume_path]
+        while dirs_to_visit:
+            current_dir = dirs_to_visit.pop()
+            for fi in w.files.list_directory_contents(current_dir):
+                if fi.is_directory:
+                    dirs_to_visit.append(fi.path.rstrip("/"))
+                else:
+                    files.append({
+                        "path": fi.path,
+                        "name": fi.path.replace(volume_path + "/", "", 1),
+                        "size": fi.file_size or 0,
+                    })
         logger.debug(f"list_volume_files({volume_path}) → {len(files)} files")
         return files, None
     except Exception as exc:
