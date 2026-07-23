@@ -9,7 +9,7 @@
 # COMMAND ----------
 # DBTITLE 1, Parameters
 
-CATALOG = "catalog_ajcos9_0aa1b0"
+CATALOG = "classic_stable_erico_adb"
 SCHEMA  = "nfcom_poc"
 TABLE   = "nfcom_data"
 VOLUME  = "xml_exports"
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.`{TABLE}` (
   ANO           INT     NOT NULL COMMENT 'Reference year',
   MES           INT     NOT NULL COMMENT 'Reference month (1–12)',
   DIA           INT     NOT NULL COMMENT 'Reference day (1–31)',
+  LINHA         STRING           COMMENT 'Phone line — NroTermPrinc (Número do Terminal Principal)',
   CHAVE_ACESSO  STRING           COMMENT '44-digit NFCom access key',
   NFCOM         STRING           COMMENT 'Full NFCom XML payload'
 )
@@ -122,6 +123,11 @@ def gerar_nfcom_xml(empresa: dict, uf: str, ano: int, mes: int, dia: int, seq: i
     cdv    = random.randint(0, 9)
     n_cont = random.randint(1000000, 9999999)
 
+    # Phone line = NroTermPrinc (Número do Terminal Principal do serviço).
+    # This is the NF-Com "Linha" the REST API filters on. DDD + 9-digit mobile.
+    ddd    = random.choice([11, 21, 31, 41, 51, 61, 71, 81, 85, 47])
+    linha  = f"{ddd}9{random.randint(10000000, 99999999)}"
+
     # Date/time
     hora   = f"{random.randint(0,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}"
     data_r = f"{ano}-{mes:02d}-{dia:02d}"
@@ -188,11 +194,14 @@ def gerar_nfcom_xml(empresa: dict, uf: str, ano: int, mes: int, dia: int, seq: i
     </dest>
     <detPlano>
       <assinante>
+        <iCodAssinante>{n_cont}</iCodAssinante>
+        <tpAssinante>1</tpAssinante>
+        <tpServUtil>1</tpServUtil>
         <nContrato>{n_cont}</nContrato>
         <dContratoIni>2020-01-01</dContratoIni>
-        <dContratoPer>{data_r}</dContratoPer>
-        <tpServUtil>1</tpServUtil>
-        <CNPJ_Oper>{cnpj}</CNPJ_Oper>
+        <dContratoFim>{data_r}</dContratoFim>
+        <NroTermPrinc>{linha}</NroTermPrinc>
+        <cUFPrinc>{cuf}</cUFPrinc>
       </assinante>
     </detPlano>
     <det nItem="1">
@@ -249,7 +258,7 @@ def gerar_nfcom_xml(empresa: dict, uf: str, ano: int, mes: int, dia: int, seq: i
   </infNFCom>
 </NFCom>"""
 
-    return chave, xml.strip()
+    return chave, linha, xml.strip()
 
 # COMMAND ----------
 # DBTITLE 1, Generate Mock Records
@@ -270,7 +279,7 @@ for emp in EMPRESAS:
             for mes in range(1, 13):
                 for dia in DIAS_PER_MES:
                     for _ in range(RECS_PER_DAY):
-                        chave, xml = gerar_nfcom_xml(emp, uf, ano, mes, dia, seq)
+                        chave, linha, xml = gerar_nfcom_xml(emp, uf, ano, mes, dia, seq)
                         records.append({
                             "ID":           str(uuid.uuid4()),
                             "EMPRESA":      emp["cnpj"],
@@ -278,6 +287,7 @@ for emp in EMPRESAS:
                             "ANO":          ano,
                             "MES":          mes,
                             "DIA":          dia,
+                            "LINHA":        linha,
                             "CHAVE_ACESSO": chave,
                             "NFCOM":        xml,
                         })
@@ -297,6 +307,7 @@ schema_spark = StructType([
     StructField("ANO",          IntegerType(), False),
     StructField("MES",          IntegerType(), False),
     StructField("DIA",          IntegerType(), False),
+    StructField("LINHA",        StringType(),  True),
     StructField("CHAVE_ACESSO", StringType(),  True),
     StructField("NFCOM",        StringType(),  True),
 ])

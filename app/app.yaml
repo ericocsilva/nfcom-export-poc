@@ -12,7 +12,7 @@ command:
 
 env:
   - name: CATALOG
-    value: "catalog_ajcos9_0aa1b0"
+    value: "classic_stable_erico_adb"
   - name: SCHEMA
     value: "nfcom_poc"
   - name: TABLE

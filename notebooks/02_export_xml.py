@@ -30,10 +30,10 @@
 # COMMAND ----------
 # DBTITLE 1, Widget Parameters
 
-dbutils.widgets.text("catalog",     "catalog_1aphlh_uefz2w",  "Catalog")
+dbutils.widgets.text("catalog",     "classic_stable_erico_adb",  "Catalog")
 dbutils.widgets.text("schema",      "nfcom_poc",               "Schema")
 dbutils.widgets.text("table",       "nfcom_data",              "Table")
-dbutils.widgets.text("volume_path", "/Volumes/catalog_1aphlh_uefz2w/nfcom_poc/xml_exports", "Volume base path")
+dbutils.widgets.text("volume_path", "/Volumes/classic_stable_erico_adb/nfcom_poc/xml_exports", "Volume base path")
 dbutils.widgets.text("empresa",     "", "EMPRESA filter (CSV or empty = all)")
 dbutils.widgets.text("uf",          "", "UF filter (CSV or empty = all)")
 dbutils.widgets.text("ano",         "", "ANO filter (CSV or empty = all)")

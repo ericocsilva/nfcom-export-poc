@@ -6,7 +6,7 @@ bundle:
 
 variables:
   catalog:
-    default: catalog_ajcos9_0aa1b0
+    default: classic_stable_erico_adb
     description: Unity Catalog catalog name
   schema:
     default: nfcom_poc
@@ -83,17 +83,17 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://adb-7405612655723059.19.azuredatabricks.net
-      profile: Demo
+      host: https://adb-7405619520780699.19.azuredatabricks.net
+      profile: vivo-target
     variables:
-      catalog: catalog_ajcos9_0aa1b0
+      catalog: classic_stable_erico_adb
       schema: nfcom_poc
 
   prod:
     mode: production
     workspace:
-      host: https://adb-7405612655723059.19.azuredatabricks.net
-      profile: Demo
+      host: https://adb-7405619520780699.19.azuredatabricks.net
+      profile: vivo-target
     variables:
-      catalog: catalog_ajcos9_0aa1b0
+      catalog: classic_stable_erico_adb
       schema: nfcom_poc

@@ -18,7 +18,7 @@ logging.basicConfig(level=_log_level, format="%(asctime)s %(levelname)s %(messag
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-CATALOG     = os.environ.get("CATALOG",  "catalog_1aphlh_uefz2w")
+CATALOG     = os.environ.get("CATALOG",  "classic_stable_erico_adb")
 SCHEMA      = os.environ.get("SCHEMA",   "nfcom_poc")
 TABLE       = os.environ.get("TABLE",    "nfcom_data")
 JOB_NAME    = os.environ.get("JOB_NAME", "NFCom - Export XML Files")
